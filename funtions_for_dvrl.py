@@ -43,6 +43,15 @@ def multivariate_data(dataset, target, start_index, end_index, history_size,
     return np.array(data), np.array(labels)
 
 
+def get_data(dataset, subtract: bool = False):
+    dataset_output = np.copy(dataset)
+    if subtract:
+        initial_values = dataset_output[0, :, :]
+        dataset_output -= np.roll(dataset_output, 1, 0)
+        dataset_output[0, :, :] = initial_values
+    return dataset_output
+
+
 def MovingBatch(x_train, y_train, time_window_size, T):
     return x_train[T:T+time_window_size], y_train[T:T+time_window_size]
 
@@ -56,12 +65,45 @@ def HMM(val_loss, T, asymtote):
 def IIR(val_loss, T, prev_avg, beta):
     return beta*val_loss + (1-beta)*prev_avg
 
-def DataValuator_LogPi(selection_vector, prob_vector):
-    log_pi_list = []
-    for i in range(selection_vector.shape[0]):
-        if torch.is_nonzero(selection_vector[i] == 1):
-            log_pi_list.append(prob_vector[i].log())
-        else:
-            log_pi_list.append((1 - prob_vector[i]).log())
-    log_pi = torch.sum(torch.stack(log_pi_list))
-    return log_pi
+
+
+
+def SelectionFromProb_2(prob_vector):
+    prob_vector = prob_vector.to("cpu")
+    prob_vector = prob_vector.detach().numpy()
+    select = np.random.binomial(1, prob_vector, prob_vector.shape)
+
+    # Exception (When selection probability is 0)
+    if np.sum(select) == 0:
+        prob_vector = 0.5 * np.ones(np.shape(prob_vector))
+        select = np.random.binomial(1, prob_vector, prob_vector.shape)
+
+    return torch.from_numpy(select)
+
+
+class RMSELoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse = nn.MSELoss()
+        
+    def forward(self,yhat,y):
+        return torch.sqrt(self.mse(yhat,y))
+
+
+def DataValuator_LogPi_2(selection_vector, prob_vector, epsilon, threshold, reward, explore_parameter):
+    reward = reward.detach()
+    
+    prob = torch.sum(selection_vector * (prob_vector + epsilon).log() + (1-selection_vector) * (1 - prob_vector + epsilon).log())
+    dve_loss = (-reward * prob) + explore_parameter * (torch.maximum(torch.mean(prob_vector) - threshold, torch.tensor(0)) + torch.maximum((1-threshold) - torch.mean(prob_vector), torch.tensor(0)))
+    return dve_loss
+
+
+# def DataValuator_LogPi(selection_vector, prob_vector):
+#     log_pi_list = []
+#     for i in range(selection_vector.shape[0]):
+#         if torch.is_nonzero(selection_vector[i] == 1):
+#             log_pi_list.append(prob_vector[i].log())
+#         else:
+#             log_pi_list.append((1 - prob_vector[i]).log())
+#     log_pi = torch.sum(torch.stack(log_pi_list))
+#     return log_pi
